@@ -1,0 +1,142 @@
+    #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu May 12 23:48:34 2022
+
+@author: kruthic
+"""
+
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import random
+# from stocktrends import Renko
+# import math
+
+def CAGR(DF):       # Compound annual growth rate
+    df = DF.copy()
+    df['return'] = df['Adj Close'].pct_change() 
+    df['cum_ret'] = (1+df['return']).cumprod()  
+    n = len(df)/12                                  # effective number of years
+    CAGR = (df['cum_ret'][-1])**(1/n) - 1
+    return CAGR
+
+def VOL(DF):        # Volatility
+    df = DF.copy()
+    df['return'] = df['Adj Close'].pct_change()
+    vol = df['return'].std()*np.sqrt(12)
+    return vol
+
+def SHARPE(DF):     # positive -> invest in this stock, negative -> invest in govt bonds instead, (0.07 -> govt interest rate)
+    df = DF.copy()
+    return (CAGR(df)-0.07)/VOL(df)
+    
+def SORTINO(DF):
+    df = DF.copy()
+    df['return'] = df['Adj Close'].pct_change()
+    neg_ret = np.where(df['return'] > 0, 0, df['return'])
+    neg_vol = pd.Series(neg_ret[neg_ret != 0]).std()
+    return (CAGR(df)-0.07)/neg_vol
+
+def DRAWDOWN(DF): 
+    df = DF.copy()
+    df['return'] = df['Adj Close'].pct_change()
+    df['cum_ret'] = (1+df['return']).cumprod()
+    df['rolling_max'] = df['cum_ret'].cummax()
+    df['drawdown'] = df['rolling_max'] - df['cum_ret']      # trying the find the largest drop in asset value
+    return (df['drawdown']/df['rolling_max']).max()         # max of (high-low)/high is max_drawdown
+
+def CALMAR(DF):  # calmar ratio
+    df = DF.copy()
+    return CAGR(df)/DRAWDOWN(df)        # Sense of risk in our portfolio, how big of a dropdown vs the annual increase rate
+    
+stocks = large_cap
+
+ohlcv_data_store = {}
+
+    
+for ticker in stocks:
+    tem = yf.download(ticker, period = '5y', interval = '1mo')
+    tem.dropna(how = 'any', axis = 0, inplace = True)
+    ohlcv_data_store[ticker] = tem
+    
+cagr = {}
+volt = {}
+sharpe = {}
+sortino = {}
+drawdown = {}
+calmar = {}
+
+stock_list = []
+ohlcv_data = {}
+for ticker in stocks:
+    if ohlcv_data_store[ticker]['Adj Close'][-1] <= 5000:
+        ohlcv_data[ticker] = ohlcv_data_store[ticker]
+        stock_list.append(ticker)
+
+portfolio = []
+count = 10
+rem   = 5
+
+choose = list(range(len(ohlcv_data)))
+random.shuffle(choose)
+return_df = pd.DataFrame()
+
+# for i in range(count):
+#     portfolio.append(stock_list[choose[i]])
+    
+for ticker in stock_list:
+    return_df[ticker] = ohlcv_data[ticker]['Adj Close'].pct_change()  # stores monthly returns of each 
+    return_df[ticker][0] = 0
+    
+return_df.dropna(axis=1, inplace=True)
+
+stock_list = list(return_df.keys())
+    
+    
+def rebalance_strat(DF, count, rem):
+    df = return_df.copy()
+    portfolio = []
+    monthly_ret = [0]
+    for i in range(1, len(df)): # no of months
+        print("i ", i)
+        if len(portfolio) > 0:
+            selected_stocks = df[portfolio].iloc[i,:]
+            monthly_ret.append(selected_stocks.mean())
+            remove_stocks = selected_stocks.sort_values(ascending = True)[:rem].index.values.tolist()
+            portfolio = [x for x in portfolio if x not in remove_stocks]
+        add_co = count - len(portfolio)
+        distinct = [x for x in stock_list if x not in portfolio]  # change if you want to allow multiple stocks
+        repeat = stock_list
+        new_picks = df[repeat].iloc[i,:].sort_values(ascending = False)[:add_co].index.values.tolist()
+        portfolio += new_picks
+        # print(portfolio)
+    monthly_ret_df = pd.DataFrame(np.array(monthly_ret), columns = ['Adj Close'])
+    return monthly_ret_df
+
+returned = pd.DataFrame()
+returned = rebalance_strat(return_df, count, rem)
+
+df = returned.copy()
+df['return'] = df['Adj Close'].pct_change() 
+df['return'] = df['return'].shift(-2)
+df['cum_ret'] = (1+df['return']).cumprod()  
+n = len(df)/12                                  # effective number of years
+print(df['cum_ret'][0])
+CAGR = (df['cum_ret'][len(df)-4])**(1/n) - 1
+return CAGR
+
+
+cagr_strat1 = CAGR(returned)
+sharpe_strat1 = SHARPE(returned)
+maxdd_strat1 = DRAWDOWN(returned)
+    
+
+for ticker in stocks:
+    cagr[ticker] = CAGR(ohlcv_data[ticker])
+    volt[ticker] = VOL(ohlcv_data[ticker])
+    sharpe[ticker] = SHARPE(ohlcv_data[ticker])
+    sortino[ticker] = SORTINO(ohlcv_data[ticker])
+    drawdown[ticker] = DRAWDOWN(ohlcv_data[ticker])
+    calmar[ticker] = CALMAR(ohlcv_data[ticker])
+    
