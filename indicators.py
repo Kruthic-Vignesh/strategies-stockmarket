@@ -19,7 +19,8 @@ def MACD(DF, fast = 12, slow = 26, signal = 9, st = 'Adj Close'):
     df['ma_slow'] = df[st].ewm(span = slow, min_periods = slow).mean()
     df['MACD']    = df['ma_fast'] - df['ma_slow']
     df['Signal']  = df['MACD'].ewm(span = signal, min_periods = signal).mean()
-    return df['MACD'], df['Signal']
+    df['Histogram'] = df['MACD'] - df['Signal']
+    return df['MACD'], df['Signal'], df['Histogram']
 
 def ATR(DF, period = 14):
     df = DF.copy()
@@ -30,11 +31,11 @@ def ATR(DF, period = 14):
     df['atr'] = df['ar'].ewm(span = period, min_periods = period).mean()
     return df['atr']
 
-def BB(DF, period = 14, offset = 2, st = 'Adj Close'):
+def BB(DF, period = 20, offset = 2, st = 'Adj Close'):
     df = DF.copy()
-    df['14avg'] = df[st].rolling(period).mean()
+    df['20avg'] = df[st].rolling(period).mean()
     df['std']   = df[st].rolling(period).std(ddof = 0)
-    return df['14avg'] - offset*df['std'], df['14avg'] + offset*df['std'], df['14avg']
+    return df['20avg'] - offset*df['std'], df['20avg'] + offset*df['std'], df['20avg']  
 
 def RSI(DF, length = 14):
     df = DF.copy()
@@ -90,9 +91,8 @@ for ticker in stocks:
     renko_data[ticker] = renko(ohlcv_data[ticker], hour_data[ticker])
     
 for ticker in stocks:
-    ohlcv_data[ticker]['MACD'], ohlcv_data[ticker]['Signal'] = MACD(ohlcv_data[ticker])
+    ohlcv_data[ticker]['MACD'], ohlcv_data[ticker]['Signal'], ohlcv_data['Histogram'] = MACD(ohlcv_data[ticker])
     ohlcv_data[ticker]['ATR'] = ATR(ohlcv_data[ticker])
     ohlcv_data[ticker]['BB_low'], ohlcv_data[ticker]['BB_high'], ohlcv_data[ticker]['BB_mid'] = BB(ohlcv_data[ticker])
     ohlcv_data[ticker]['RSI'] = RSI(ohlcv_data[ticker])
     ohlcv_data[ticker][['ADX', '+DI', '-DI']] = ADX(ohlcv_data[ticker])
-

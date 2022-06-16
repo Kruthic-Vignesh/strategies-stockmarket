@@ -9,22 +9,25 @@ Created on Thu May 12 23:48:34 2022
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import random
-# from stocktrends import Renko
-# import math
 
-def CAGR(DF):       # Compound annual growth rate
+backtest_data = {}
+
+divide = {"m": 12, "d": 250, "y": 1}
+
+def CAGR(DF, period = 'm'):       # Compound annual growth rate
     df = DF.copy()
     df['return'] = df['Adj Close'].pct_change() 
     df['cum_ret'] = (1+df['return']).cumprod()  
-    n = len(df)/12                                  # effective number of years
-    CAGR = (df['cum_ret'][-1])**(1/n) - 1
+    n = len(df)/divide[period]       # effective number of years
+    if df['cum_ret'].tolist()[-1] < 0:
+        return -2
+    CAGR = (df['cum_ret'].tolist()[-1])**(1/n) - 1
     return CAGR
 
-def VOL(DF):        # Volatility
+def VOL(DF, period = 'm'):        # Volatility
     df = DF.copy()
     df['return'] = df['Adj Close'].pct_change()
-    vol = df['return'].std()*np.sqrt(12)
+    vol = df['return'].std()*np.sqrt(divide['m'])
     return vol
 
 def SHARPE(DF):     # positive -> invest in this stock, negative -> invest in govt bonds instead, (0.07 -> govt interest rate)
@@ -49,16 +52,36 @@ def DRAWDOWN(DF):
 def CALMAR(DF):  # calmar ratio
     df = DF.copy()
     return CAGR(df)/DRAWDOWN(df)        # Sense of risk in our portfolio, how big of a dropdown vs the annual increase rate
+
+
+def RSI(DF, length = 14):
+    df = DF.copy()
+    df['change'] = df['Adj Close'] - df['Adj Close'].shift(1)
+    df['gain'] = np.where(df['change'] > 0, df['change'], 0)
+    df['loss'] = np.where(df['change'] < 0, -df['change'], 0)
+    df['avggain'] = df['gain'].ewm(alpha = 1/length, min_periods = length).mean()
+    df['avgloss'] = df['loss'].ewm(alpha = 1/length, min_periods = length).mean()
+    df['rs'] = df['avggain']/df['avgloss']
+    df['rsi'] = 100 - 100/(1+df['rs'])
+    return df['rsi']
     
-stocks = large_cap
+
+### Collecting stock info ###
+
+''' Do not recompile everytime '''
+stocks = []
+f = open('lc.txt', 'r')
+for word in f:
+    stocks.append(word[:-1] + '.NS')
 
 ohlcv_data_store = {}
-
     
 for ticker in stocks:
-    tem = yf.download(ticker, period = '5y', interval = '1mo')
+    tem = yf.download(ticker, period = 'max', interval = '1mo')
     tem.dropna(how = 'any', axis = 0, inplace = True)
     ohlcv_data_store[ticker] = tem
+
+backtest_data['max_1mo'] = ohlcv_data_store
     
 cagr = {}
 volt = {}
@@ -67,76 +90,76 @@ sortino = {}
 drawdown = {}
 calmar = {}
 
-stock_list = []
-ohlcv_data = {}
+stock_list_dont = []
+ohlcv_data_dont = {}
 for ticker in stocks:
     if ohlcv_data_store[ticker]['Adj Close'][-1] <= 5000:
-        ohlcv_data[ticker] = ohlcv_data_store[ticker]
-        stock_list.append(ticker)
+        ohlcv_data_dont[ticker] = ohlcv_data_store[ticker]
+        stock_list_dont.append(ticker)
+        
+''' Change stuff from this area '''
 
-portfolio = []
-count = 10
-rem   = 5
+### Rebalancing based on current month's performance ###
 
-choose = list(range(len(ohlcv_data)))
-random.shuffle(choose)
+ohlcv_data = ohlcv_data_dont
+stock_list = stock_list_dont
+
 return_df = pd.DataFrame()
 
-# for i in range(count):
-#     portfolio.append(stock_list[choose[i]])
-    
 for ticker in stock_list:
     return_df[ticker] = ohlcv_data[ticker]['Adj Close'].pct_change()  # stores monthly returns of each 
     return_df[ticker][0] = 0
     
-return_df.dropna(axis=1, inplace=True)
+return_df.fillna(0, inplace = True)
+
+# use if needed to drop stocks
+# return_df.dropna(axis=1, inplace=True)
 
 stock_list = list(return_df.keys())
-    
-    
+
 def rebalance_strat(DF, count, rem):
     df = return_df.copy()
     portfolio = []
     monthly_ret = [0]
+    monthly_port = []
+    money = 100
     for i in range(1, len(df)): # no of months
-        print("i ", i)
         if len(portfolio) > 0:
             selected_stocks = df[portfolio].iloc[i,:]
             monthly_ret.append(selected_stocks.mean())
+            
+            money *= 1+monthly_ret[-1]
+            
             remove_stocks = selected_stocks.sort_values(ascending = True)[:rem].index.values.tolist()
             portfolio = [x for x in portfolio if x not in remove_stocks]
         add_co = count - len(portfolio)
         distinct = [x for x in stock_list if x not in portfolio]  # change if you want to allow multiple stocks
-        repeat = stock_list
-        new_picks = df[repeat].iloc[i,:].sort_values(ascending = False)[:add_co].index.values.tolist()
+        # repeat = stock_list
+        new_picks = df[distinct].iloc[i,:].sort_values(ascending = False)[:add_co].index.values.tolist()
         portfolio += new_picks
-        # print(portfolio)
+        monthly_port.append(portfolio)
     monthly_ret_df = pd.DataFrame(np.array(monthly_ret), columns = ['Adj Close'])
-    return monthly_ret_df
-
-returned = pd.DataFrame()
-returned = rebalance_strat(return_df, count, rem)
-
-df = returned.copy()
-df['return'] = df['Adj Close'].pct_change() 
-df['return'] = df['return'].shift(-2)
-df['cum_ret'] = (1+df['return']).cumprod()  
-n = len(df)/12                                  # effective number of years
-print(df['cum_ret'][0])
-CAGR = (df['cum_ret'][len(df)-4])**(1/n) - 1
-return CAGR
+    return monthly_ret_df, money
 
 
-cagr_strat1 = CAGR(returned)
-sharpe_strat1 = SHARPE(returned)
-maxdd_strat1 = DRAWDOWN(returned)
+### Testing for different values of portfolio size ###
+
+def test_different_pfsize(limit = 10):
+    money_max = -2
+    count_max = -2
     
+    for i in range(2, limit, 2):
+        returned = pd.DataFrame()
+        returned, money = rebalance_strat(return_df, i, i//2)
+        
+        returned = returned[1:]
+        
+        if money > money_max:
+            money_max = money
+            count_max = i
+        
+    return money_max, count_max
 
-for ticker in stocks:
-    cagr[ticker] = CAGR(ohlcv_data[ticker])
-    volt[ticker] = VOL(ohlcv_data[ticker])
-    sharpe[ticker] = SHARPE(ohlcv_data[ticker])
-    sortino[ticker] = SORTINO(ohlcv_data[ticker])
-    drawdown[ticker] = DRAWDOWN(ohlcv_data[ticker])
-    calmar[ticker] = CALMAR(ohlcv_data[ticker])
-    
+dif_pf_size_money, dif_pf_size_count = test_different_pfsize(limit = 20)
+
+### Endof testing different portfolio sizes for maximum gains ###

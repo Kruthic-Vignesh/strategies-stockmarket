@@ -16,7 +16,7 @@ def CAGR(DF):       # Compound annual growth rate
     df = DF.copy()
     df['return'] = df['Adj Close'].pct_change()
     df['cum_ret'] = (1+df['return']).cumprod()
-    n = len(df)/252
+    n = len(df)/249
     CAGR = (df['cum_ret'][-1])**(1/n) - 1
     return CAGR
 
